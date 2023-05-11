@@ -1,3 +1,5 @@
+# Copyright (c) 2023-present, Junyeol Ryu
+
 TARGET=main
 OBJECTS=main.o util.o namegen.o matmul-kernel.o
 

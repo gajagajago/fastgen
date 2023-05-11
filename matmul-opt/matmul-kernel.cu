@@ -1,3 +1,5 @@
+// Copyright (c) 2023-present, Junyeol Ryu
+
 #include "matmul-kernel.h"
 #include <assert.h>
 

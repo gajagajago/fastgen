@@ -1,3 +1,5 @@
+// Copyright (c) 2023-present, Junyeol Ryu
+
 #pragma once
 
 #define MAX_LEN 10

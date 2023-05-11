@@ -1,3 +1,5 @@
+// Copyright (c) 2023-present, Junyeol Ryu
+
 #pragma once
 
 #include <cstdio>

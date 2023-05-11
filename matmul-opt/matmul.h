@@ -1,3 +1,5 @@
+// Copyright (c) 2023-present, Junyeol Ryu
+
 #pragma once
 
 void matmul_initialize(const float *A, const float *B);

@@ -1,3 +1,5 @@
+// Copyright (c) 2023-present, Junyeol Ryu
+
 #pragma once
 
 __global__ void matmul_naive_kernel(float *d_M, float *d_N, float *d_P, int M, int N, int K);

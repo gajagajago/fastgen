@@ -43,14 +43,16 @@ constexpr int TILE_N = 64;
 constexpr int TILE_K = 32;
 constexpr int BLOCK_M = 16;
 constexpr int BLOCK_N = 16;
-constexpr int REG_M = ((TILE_M + BLOCK_M - 1) / BLOCK_M);
-constexpr int REG_N = (((TILE_N / VC) + BLOCK_N - 1) / BLOCK_N);
-constexpr int A_N = MAX(MIN(TILE_K / VA, BLOCK_N), 1);
-constexpr int A_M = (BLOCK_M * BLOCK_N) / A_N;
-constexpr int B_N = MAX(MIN(TILE_N / VC, BLOCK_N), 1);
-constexpr int B_M = (BLOCK_M * BLOCK_N) / B_N;
+constexpr int REG_M = ((TILE_M + BLOCK_M - 1) / BLOCK_M); // 한 스레드가 output tile에서 세로 방향에서 처리하는 (vector) 개수
+constexpr int REG_N = (((TILE_N / VC) + BLOCK_N - 1) / BLOCK_N);  // 한 스레드가 output tile에서 가로 방향에서 처리하는 vector 개수
+constexpr int A_N = MAX(MIN(TILE_K / VA, BLOCK_N), 1);  // A tile 한 row load 당 thread 개수 (row 사이즈보다 작은 경우, 여러 차례에 나눠 진행)
+constexpr int A_M = (BLOCK_M * BLOCK_N) / A_N;  // 한 threadblock이 한번에 load하는 A tile의 row 개수
+constexpr int B_N = MAX(MIN(TILE_N / VC, BLOCK_N), 1);  // B tile 한 row load 당 thread의 개수
+constexpr int B_M = (BLOCK_M * BLOCK_N) / B_N;  // 한 threadblock이 한번에 load하는 B tile의 row 개수
 constexpr int TILE_K_VA = TILE_K / VA;
 constexpr int TILE_N_VC = TILE_N / VC;
+
+#define WARMUP 
 
 __global__ void kernel_matmul_t_opt(type_a* A, type_c* B, type_c* C, int M, int N, int K) {
   int _K = K / VA;
@@ -73,21 +75,21 @@ __global__ void kernel_matmul_t_opt(type_a* A, type_c* B, type_c* C, int M, int 
     }
   }
 
-  int ax = (threadIdx.y * blockDim.x + threadIdx.x) % A_N;
-  int ay = (threadIdx.y * blockDim.x + threadIdx.x) / A_N;
+  int ax = (threadIdx.y * blockDim.x + threadIdx.x) % A_N;  // A tile load 시 (여러번 걸릴 수 있음) thread 당 x좌표 (여러번하면 움직임)
+  int ay = (threadIdx.y * blockDim.x + threadIdx.x) / A_N;  // A tile load 시 (여러번 걸릴 수 있음) thread 당 y좌표
 
-  int bx = (threadIdx.y * blockDim.x + threadIdx.x) % B_N;
-  int by = (threadIdx.y * blockDim.x + threadIdx.x) / B_N;
+  int bx = (threadIdx.y * blockDim.x + threadIdx.x) % B_N; // B tile load 시 (여러번 걸릴 수 있음) thread 당 x좌표
+  int by = (threadIdx.y * blockDim.x + threadIdx.x) / B_N; // B tile load 시 (여러번 걸릴 수 있음) thread 당 y좌표
 
 
   for (int tk = 0; tk < K; tk += TILE_K) {
 
 #pragma unroll
-    for (int ii = 0; ii < TILE_M / A_M; ++ii) {
+    for (int ii = 0; ii < TILE_M / A_M; ++ii) { // A tile의 가로-wise 여러번 걸림
       int li = A_M * ii + ay;
       int Ai = blockIdx.y * TILE_M + li;
 #pragma unroll
-      for (int kk = 0; kk < TILE_K_VA / A_N; ++kk) {
+      for (int kk = 0; kk < TILE_K_VA / A_N; ++kk) {  // A tile의 세로-wise (한 row) 여러번 걸림 
         int lj = A_N * kk + ax;
         int Aj = (tk / VA) + lj;
         type_a val = (Ai < M && Aj < _K) ? A[Ai * _K + Aj] : ZEROA;
@@ -112,12 +114,13 @@ __global__ void kernel_matmul_t_opt(type_a* A, type_c* B, type_c* C, int M, int 
 
 #pragma unroll
     for (int y = 0; y < REG_M; ++y) {
-      int si = threadIdx.y + y * BLOCK_M;
+      int si = threadIdx.y + y * BLOCK_M; // 내가 계산할 A tile의 y좌표
 #pragma unroll
       for (int x = 0; x < REG_N; ++x) {
-        int sj = threadIdx.x + x * BLOCK_N;
+        int sj = threadIdx.x + x * BLOCK_N; // 내가 계산할 B tile의 x좌표
 #pragma unroll
         for (int lk = 0; lk < TILE_K / VA; ++lk) {
+          // A tile의 한 원소는 벡터 (4개) -> 한 원소는 B 타일의 x좌표에 해당하는 곳에서 (가로) 위부터 가로로 4개씩 곱해서 creg로 더함 
 
           creg[y][x].x += Ashared[si][lk].x * Bshared[VC * lk + 0][sj].x;
           creg[y][x].y += Ashared[si][lk].x * Bshared[VC * lk + 0][sj].y;
@@ -145,7 +148,7 @@ __global__ void kernel_matmul_t_opt(type_a* A, type_c* B, type_c* C, int M, int 
     __syncthreads();
   }
 
-
+// 내가 처리해야 할 creg 값 16개 처리
 #pragma unroll
   for (int y = 0; y < REG_M; ++y) {
 #pragma unroll
